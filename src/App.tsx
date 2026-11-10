@@ -237,7 +237,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
       )
       .sort((a, b) =>
         sort === 'merged'
-          ? count(b.issues, 'merged') - count(a.issues, 'merged') || byName(a, b)
+          ? count(b.issues, 'merged') - count(a.issues, 'merged') || count(b.issues, 'open') - count(a.issues, 'open') || byName(a, b)
           : sort === 'least'
             ? progress(a) - progress(b) || byName(a, b)
             : byName(a, b),
@@ -291,7 +291,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
           onChange={setSort}
           options={[
             { value: 'name', label: 'Sort: Name' },
-            { value: 'merged', label: 'Sort: Most merged' },
+            { value: 'merged', label: 'Sort: Most progress' },
             { value: 'least', label: 'Sort: Least progress' },
           ]}
         />
