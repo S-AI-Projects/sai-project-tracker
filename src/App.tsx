@@ -215,7 +215,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
     return students
       .filter(
         (s) =>
-          (!needle || s.name.toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle)) &&
+          (!needle || s.name.toLowerCase().includes(needle)) &&
           (!batch || s.batch === batch) &&
           (!lab || s.lab === lab) &&
           (!repo || s.repo === repo),
@@ -267,7 +267,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
         <div className="max-w-[340px] flex-[1_1_260px]">
           <Search
             aria-label="Search students"
-            placeholder="Search by name or enrollment no"
+            placeholder="Search by name"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -308,7 +308,6 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
               <TableCell className="text-muted-foreground">{start + i + 1}</TableCell>
               <TableCell>
                 <div className="font-medium">{s.name}</div>
-                <div className="text-xs text-muted-foreground">{s.id}</div>
               </TableCell>
               <TableCell>
                 <div>{s.batch}</div>
