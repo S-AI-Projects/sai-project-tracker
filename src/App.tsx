@@ -205,7 +205,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
   const [batch, setBatch] = useState('')
   const [lab, setLab] = useState('')
   const [repo, setRepo] = useState('')
-  const [sort, setSort] = useState('name')
+  const [sort, setSort] = useState('merged')
   const [page, setPage] = useState(0)
   const { students, org } = data
 
