@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableCell, TableHead, TableRow } from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 type Status = 'none' | 'open' | 'merged'
@@ -38,15 +39,25 @@ function Dot({ status, className }: { status: Status; className?: string }) {
   return <span className={cn('size-2.5 shrink-0 rounded-full', BG[status], className)} />
 }
 
-function Select({ className, ...props }: ComponentProps<'select'>) {
+type Option = { value: string; label: string }
+
+// Radix Select items cannot have an empty value, so "" (no filter) maps to ALL.
+const ALL = '__all'
+
+function Filter({ label, value, onChange, options, className }: { label: string; value: string; onChange: (v: string) => void; options: Option[]; className?: string }) {
   return (
-    <select
-      className={cn(
-        'h-9 max-w-full rounded-md border bg-background px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        className,
-      )}
-      {...props}
-    />
+    <Select value={value || ALL} onValueChange={(v) => onChange(v === ALL ? '' : v)}>
+      <SelectTrigger aria-label={label} className={className}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value || ALL} value={o.value || ALL}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -240,12 +251,7 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
     set: (v: string) => void,
     options: string[],
   ): ReactNode => (
-    <Select aria-label={label} value={value} onChange={(e) => set(e.target.value)}>
-      <option value="">{all}</option>
-      {options.map((o) => (
-        <option key={o}>{o}</option>
-      ))}
-    </Select>
+    <Filter label={label} value={value} onChange={set} options={[{ value: '', label: all }, ...options.map((o) => ({ value: o, label: o }))]} />
   )
 
   return (
@@ -275,11 +281,16 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
         {filter('Batch', 'All batches', batch, setBatch, stats.batches)}
         {filter('Lab batch', 'All lab batches', lab, setLab, stats.labs)}
         {filter('Repository', 'All repositories', repo, setRepo, stats.repos)}
-        <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="name">Sort: Name</option>
-          <option value="merged">Sort: Most merged</option>
-          <option value="least">Sort: Least progress</option>
-        </Select>
+        <Filter
+          label="Sort"
+          value={sort}
+          onChange={setSort}
+          options={[
+            { value: 'name', label: 'Sort: Name' },
+            { value: 'merged', label: 'Sort: Most merged' },
+            { value: 'least', label: 'Sort: Least progress' },
+          ]}
+        />
         <div className="grow" />
         <div className="flex items-center gap-3.5 text-xs text-zinc-600">
           {(['none', 'open', 'merged'] as const).map((s) => (
@@ -493,22 +504,20 @@ function Repos({ data, selected, select }: { data: Data; selected: string; selec
         </div>
 
         <div className="flex flex-wrap gap-2.5">
-          <Select aria-label="Status" className="text-[13px]" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All statuses</option>
-            {(['none', 'open', 'merged'] as const).map((s) => (
-              <option key={s} value={s}>
-                {LABEL[s]}
-              </option>
-            ))}
-          </Select>
-          <Select aria-label="Student" className="text-[13px]" value={student} onChange={(e) => setStudent(e.target.value)}>
-            <option value="">All {members.length} students</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </Select>
+          <Filter
+            label="Status"
+            className="text-[13px]"
+            value={status}
+            onChange={setStatus}
+            options={[{ value: '', label: 'All statuses' }, ...(['none', 'open', 'merged'] as const).map((x) => ({ value: x, label: LABEL[x] }))]}
+          />
+          <Filter
+            label="Student"
+            className="text-[13px]"
+            value={student}
+            onChange={setStudent}
+            options={[{ value: '', label: `All ${members.length} students` }, ...members.map((m) => ({ value: m.id, label: m.name }))]}
+          />
         </div>
 
         <Table className="min-w-[760px] text-[13px]">
