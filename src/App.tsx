@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableCell, TableHead, TableRow } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
@@ -76,7 +77,7 @@ function Search(props: ComponentProps<'input'>) {
         <circle cx="11" cy="11" r="7" />
         <path d="M20 20l-3.5-3.5" />
       </svg>
-      <Input type="search" className="pl-9" {...props} />
+      <Input type="text" className="pl-9" {...props} />
     </div>
   )
 }
@@ -128,22 +129,12 @@ export default function App() {
             github.com/{org}
           </a>
         </div>
-        <nav className="flex gap-1 rounded-lg bg-muted p-1 sm:ml-4">
-          {(['students', 'repos'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              aria-current={route.tab === t ? 'page' : undefined}
-              onClick={() => go(t, t === 'repos' ? route.repo : '')}
-              className={cn(
-                'rounded-md px-3.5 py-1.5 text-sm font-medium text-zinc-600',
-                route.tab === t && 'bg-background text-foreground shadow-sm',
-              )}
-            >
-              {t === 'students' ? 'Students' : 'Repositories'}
-            </button>
-          ))}
-        </nav>
+        <Tabs value={route.tab} onValueChange={(t) => go(t as Route['tab'], t === 'repos' ? route.repo : '')} className="sm:ml-4">
+          <TabsList>
+            <TabsTrigger value="students">Students</TabsTrigger>
+            <TabsTrigger value="repos">Repositories</TabsTrigger>
+          </TabsList>
+        </Tabs>
         <div className="grow" />
         {data && (
           <div className="text-[13px] text-muted-foreground">
@@ -325,9 +316,9 @@ function Students({ data, openRepo }: { data: Data; openRepo: (repo: string) => 
                 <div className="text-xs text-muted-foreground">{s.lab}</div>
               </TableCell>
               <TableCell>
-                <button type="button" onClick={() => openRepo(s.repo)} className={cn(LINK, 'text-left text-[13px]')}>
+                <Button variant="link" className="text-[13px]" onClick={() => openRepo(s.repo)}>
                   {s.repo}
-                </button>
+                </Button>
               </TableCell>
               <TableCell>
                 <div className="flex gap-1.5">
