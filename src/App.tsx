@@ -84,7 +84,8 @@ function Search(props: ComponentProps<'input'>) {
 
 const REPO = 'S-AI-Projects/sai-project-tracker'
 const DATA_URL = `https://raw.githubusercontent.com/${REPO}/main/data/tracker.json`
-const REFRESH_URL = `https://github.com/${REPO}/actions/workflows/fetch-data.yml`
+const REFRESH_URL = `https://github.com/${REPO}/issues/new?title=${encodeURIComponent('Refresh data')}&body=${encodeURIComponent('Submit this issue to refresh the tracker data. It closes itself. Reload the dashboard after about 2 minutes.')}`
+const COOLDOWN_MS = 15 * 60 * 1000 // keep in sync with .github/workflows/fetch-data.yml
 
 export default function App() {
   const [data, setData] = useState<Data | null>(null)
@@ -93,7 +94,7 @@ export default function App() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(DATA_URL, { cache: 'no-store' })
+      const res = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' })
       if (!res.ok) throw new Error()
       setData(await res.json())
       setState('ready')
@@ -112,6 +113,14 @@ export default function App() {
   const go = (tab: Route['tab'], repo = '') => {
     location.hash = `/${tab}${repo ? '/' + encodeURIComponent(repo) : ''}`
   }
+
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(t)
+  }, [])
+  const nextRefresh = data ? new Date(data.syncedAt).getTime() + COOLDOWN_MS : 0
+  const cooling = nextRefresh > now
 
   const org = data?.org ?? 'S-AI-Projects'
 
@@ -142,7 +151,11 @@ export default function App() {
             {new Date(data.syncedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
           </div>
         )}
-        <Button onClick={() => window.open(REFRESH_URL, '_blank', 'noopener')} title="Opens the GitHub Action. Click Run workflow there, then reload this page after about a minute.">
+        <Button
+          disabled={cooling}
+          onClick={() => window.open(REFRESH_URL, '_blank', 'noopener')}
+          title="Opens a GitHub issue. Submit it to refresh the data, then reload this page after about 2 minutes. Limited to once every 15 minutes."
+        >
           <svg
             aria-hidden="true"
             className="size-[15px]"
@@ -156,7 +169,7 @@ export default function App() {
             <path d="M21 12a9 9 0 1 1-2.64-6.36" />
             <path d="M21 3v6h-6" />
           </svg>
-          Refresh
+          {cooling ? `Refresh at ${new Date(nextRefresh).toLocaleTimeString(undefined, { timeStyle: 'short' })}` : 'Refresh'}
         </Button>
       </header>
 

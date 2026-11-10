@@ -9,10 +9,11 @@ Traffic-light tracker for student issue assignments in the `S-AI-Projects` GitHu
 
 ## How it runs
 
-- `Fetch data` workflow: daily at 00:00 IST, or manually (Actions > Fetch data > Run workflow). Runs `scripts/fetch-data.mjs` and commits `data/tracker.json` to `main`.
+- `Fetch data` workflow: daily at 00:00 and 12:00 IST. Runs `scripts/fetch-data.mjs` and commits `data/tracker.json` to `main`.
+- Anyone logged in to GitHub can trigger it: the Refresh button opens a pre-filled `Refresh data` issue, and submitting it starts the workflow. The workflow comments and closes the issue.
+- Issue-triggered refreshes are limited to one every 15 minutes, measured from the last sync by anyone. Scheduled runs and manual runs (Actions > Fetch data > Run workflow) always run.
 - The app reads `data/tracker.json` straight from `raw.githubusercontent.com` at page load, so a data update needs no rebuild. GitHub caches raw files for up to 5 minutes.
 - `Deploy` workflow: rebuilds and publishes the UI on pushes to `main` that touch app code. Data, script and markdown changes do not trigger it.
-- The Refresh button opens the `Fetch data` workflow page.
 
 ## Status rules
 
