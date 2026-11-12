@@ -16,6 +16,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-chart: #2563eb;
+  --color-chart-hover: #1d4ed8;
   --color-none: #dc2626;
   --color-open: #facc15;
   --color-merged: #16a34a;

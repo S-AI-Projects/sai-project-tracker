@@ -18,8 +18,9 @@ type Issue = {
   pr: null | { number: number; author: string; state: 'open' | 'merged' | 'closed' }
 }
 type Student = { id: string; name: string; batch: string; lab: string; repo: string; issues: Issue[] }
-type Data = { org: string; syncedAt: string; students: Student[] }
-type Route = { tab: 'students' | 'repos'; repo: string }
+type Day = { date: string; count: number }
+type Data = { org: string; syncedAt: string; commits?: Day[]; students: Student[] }
+type Route = { tab: 'students' | 'repos' | 'activity'; repo: string }
 
 const STATUSES: Status[] = ['merged', 'open', 'none']
 const LABEL: Record<Status, string> = { none: 'No PR', open: 'PR raised', merged: 'Merged' }
@@ -33,7 +34,7 @@ const pct = (n: number, total: number) => (total ? ((n / total) * 100).toFixed(1
 
 function parseHash(): Route {
   const [tab, ...rest] = location.hash.replace(/^#\/?/, '').split('/')
-  return { tab: tab === 'repos' ? 'repos' : 'students', repo: decodeURIComponent(rest.join('/')) }
+  return { tab: tab === 'repos' || tab === 'activity' ? tab : 'students', repo: decodeURIComponent(rest.join('/')) }
 }
 
 function Dot({ status, className }: { status: Status; className?: string }) {
@@ -142,6 +143,7 @@ export default function App() {
           <TabsList>
             <TabsTrigger value="students">Students</TabsTrigger>
             <TabsTrigger value="repos">Repositories</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="grow" />
@@ -179,8 +181,10 @@ export default function App() {
         {data &&
           (route.tab === 'students' ? (
             <Students data={data} openRepo={(r) => go('repos', r)} />
-          ) : (
+          ) : route.tab === 'repos' ? (
             <Repos data={data} selected={route.repo} select={(r) => go('repos', r)} />
+          ) : (
+            <Activity days={data.commits ?? []} />
           ))}
       </main>
     </div>
@@ -585,5 +589,90 @@ function Repos({ data, selected, select }: { data: Data; selected: string; selec
         </div>
       </section>
     </div>
+  )
+}
+
+const fmtDay = (date: string, opts: Intl.DateTimeFormatOptions) =>
+  new Date(date + 'T00:00:00').toLocaleDateString(undefined, opts)
+
+function Activity({ days }: { days: Day[] }) {
+  const [hover, setHover] = useState<Day | null>(null)
+  const total = days.reduce((n, d) => n + d.count, 0)
+  // Round the axis top up to a "nice" number so the gridlines read cleanly.
+  const peak = Math.max(1, ...days.map((d) => d.count))
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000].find((s) => peak / s <= 4) ?? 10000
+  const top = Math.ceil(peak / step) * step
+  const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step).reverse()
+  const labelEvery = Math.ceil(days.length / 10)
+  const shown = hover ?? days[days.length - 1]
+
+  if (!days.length) return <p className="text-sm text-muted-foreground">No commit data yet. It appears after the next refresh.</p>
+
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">Commits per day</h2>
+          <p className="text-[13px] text-muted-foreground">
+            Commits in pull requests across all repositories, by author date (IST). Merge commits excluded.
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-semibold tabular-nums">{total.toLocaleString()}</div>
+          <div className="text-xs text-muted-foreground">commits since {fmtDay(days[0].date, { day: 'numeric', month: 'short' })}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 h-5 text-[13px]" aria-live="polite">
+        <span className="font-medium">{fmtDay(shown.date, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+        <span className="text-muted-foreground">
+          : {shown.count.toLocaleString()} {shown.count === 1 ? 'commit' : 'commits'}
+        </span>
+      </div>
+
+      <div className="mt-2 flex gap-2">
+        <div className="flex h-64 flex-col justify-between text-right text-xs text-muted-foreground tabular-nums">
+          {ticks.map((t) => (
+            <span key={t} className="-translate-y-1/2 leading-none first:translate-y-0 last:translate-y-0">
+              {t}
+            </span>
+          ))}
+        </div>
+        <div className="min-w-0 grow overflow-x-auto">
+          <div style={{ minWidth: days.length * 14 }}>
+            <div className="relative h-64 border-b">
+              {ticks.slice(0, -1).map((t) => (
+                <div key={t} className="absolute inset-x-0 border-t border-muted" style={{ bottom: `${(t / top) * 100}%` }} />
+              ))}
+              <div className="absolute inset-0 flex items-end gap-[2px]" onMouseLeave={() => setHover(null)}>
+                {days.map((d) => (
+                  <button
+                    key={d.date}
+                    type="button"
+                    aria-label={`${fmtDay(d.date, { day: 'numeric', month: 'short' })}: ${d.count} commits`}
+                    onMouseEnter={() => setHover(d)}
+                    onFocus={() => setHover(d)}
+                    onBlur={() => setHover(null)}
+                    className="group flex h-full min-w-0 flex-1 items-end justify-center outline-none"
+                  >
+                    <span
+                      className="w-full max-w-10 rounded-t-[4px] bg-chart group-hover:bg-chart-hover group-focus-visible:bg-chart-hover"
+                      style={{ height: `${(d.count / top) * 100}%`, minHeight: d.count ? 2 : 0 }}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-1.5 flex gap-[2px] text-xs text-muted-foreground">
+              {days.map((d, i) => (
+                <span key={d.date} className="min-w-0 flex-1 text-center whitespace-nowrap">
+                  {i % labelEvery === 0 ? fmtDay(d.date, { day: 'numeric', month: 'short' }) : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
   )
 }

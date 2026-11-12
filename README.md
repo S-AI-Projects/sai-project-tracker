@@ -15,6 +15,14 @@ Traffic-light tracker for student issue assignments in the `S-AI-Projects` GitHu
 - The app reads `data/tracker.json` straight from `raw.githubusercontent.com` at page load, so a data update needs no rebuild. GitHub caches raw files for up to 5 minutes.
 - `Deploy` workflow: rebuilds and publishes the UI on pushes to `main` that touch app code. Data, script and markdown changes do not trigger it.
 
+## Commits per day
+
+- The Activity tab shows a bar chart of commits per day across the org.
+- Students push to their own forks, so the count is the commits inside pull requests (open, merged or closed) to the org repos.
+- Each commit is counted once, on its author date in IST. Merge commits are excluded.
+- The chart starts at `COMMITS_SINCE` in `scripts/fetch-data.mjs`.
+- Commits that are pushed to a fork but not yet in a PR are not visible to the tracker.
+
 ## Status rules
 
 - Green (`merged`): linked PR is merged.

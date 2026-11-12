@@ -10,6 +10,7 @@ const BATCH_PAUSE_MS = 500; // pause between batches
 const TIMEOUT_MS = 20000;   // per request
 const RETRIES = 4;          // attempts per request
 const MAX_WAIT_MS = 120000; // longest rate-limit wait before giving up
+const COMMITS_SINCE = '2026-11-03'; // first day on the commits chart (IST), when the org repos were created
 const RANK = { merged: 3, open: 2, closed: 1 };
 
 const CLOSING_RE =
@@ -79,10 +80,10 @@ export function parseAssignments(text) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** GET with a per-request timeout, retries with backoff, and rate-limit waits. */
-async function gh(url, headers) {
+async function gh(url, headers, payload) {
   for (let attempt = 1; ; attempt++) {
     let res, err;
-    try { res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) }); } catch (e) { err = e; }
+    try { res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS), ...(payload && { method: 'POST', body: JSON.stringify(payload) }) }); } catch (e) { err = e; }
     if (res?.status === 200) return res.json();
     const body = res ? (await res.text().catch(() => '')).slice(0, 200) : String(err?.message || err);
     const limited = res && (res.status === 429 || (res.status === 403 &&
@@ -112,6 +113,45 @@ async function fetchPrs(repo) {
   }
 }
 
+const COMMITS_QUERY = `query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 50, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { commits(first: 100) { nodes { commit { oid authoredDate parents { totalCount } } } } }
+    }
+  }
+}`;
+
+/** Non-merge commits in every PR (open, merged or closed) of a repo. Students push to their own forks, so PRs are where their commits show up. */
+async function fetchPrCommits(repo) {
+  const headers = { 'User-Agent': 'sai-project-tracker', Authorization: `Bearer ${process.env.GITHUB_TOKEN}` };
+  const all = [];
+  for (let cursor = null; ; ) {
+    const res = await gh('https://api.github.com/graphql', headers, { query: COMMITS_QUERY, variables: { owner: ORG, name: repo, cursor } });
+    if (res.errors?.length) throw new Error(`GitHub GraphQL for ${repo}: ${res.errors[0].message}`);
+    const prs = res.data.repository.pullRequests;
+    for (const pr of prs.nodes) for (const { commit } of pr.commits.nodes) if (commit.parents.totalCount < 2) all.push(commit);
+    if (!prs.pageInfo.hasNextPage) return all;
+    cursor = prs.pageInfo.endCursor;
+  }
+}
+
+const istDay = (t) => new Date(new Date(t).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+/** [{date: 'YYYY-MM-DD', count}] for every IST day from COMMITS_SINCE to today, by author date, each commit counted once. */
+export function commitsPerDay(commits, now = Date.now()) {
+  const days = new Map();
+  for (let d = COMMITS_SINCE, end = istDay(now); d <= end; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) days.set(d, 0);
+  const seen = new Set();
+  for (const c of commits) {
+    const d = istDay(c.authoredDate);
+    if (seen.has(c.oid) || !days.has(d)) continue;
+    seen.add(c.oid);
+    days.set(d, days.get(d) + 1);
+  }
+  return [...days].map(([date, count]) => ({ date, count }));
+}
+
 /** Repos go out in small batches with a pause between them, to stay under GitHub's secondary limits. */
 async function inBatches(items, size, pauseMs, fn) {
   const out = [];
@@ -132,6 +172,10 @@ export async function fetchData() {
   for (const r of rows) if (r.taskId) taskMaps.get(r.repo).set(String(r.taskId).toUpperCase(), r.number);
 
   const prLists = await inBatches(repos, BATCH, BATCH_PAUSE_MS, fetchPrs); // throws on any failure
+  let commits = [];
+  if (process.env.GITHUB_TOKEN) commits = commitsPerDay((await inBatches(repos, BATCH, BATCH_PAUSE_MS, fetchPrCommits)).flat());
+  else console.warn('[fetch-data] no GITHUB_TOKEN, skipping commits per day (GraphQL needs a token)');
+
   const best = new Map(repos.map((repo, i) => [repo, bestPrs(prLists[i], repo, taskMaps.get(repo))]));
 
   const students = new Map();
@@ -154,7 +198,7 @@ export async function fetchData() {
   await mkdir(dir, { recursive: true });
   const out = join(dir, 'tracker.json');
   const tmp = `${out}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify({ org: ORG, syncedAt, students: list }));
+  await writeFile(tmp, JSON.stringify({ org: ORG, syncedAt, commits, students: list }));
   await rename(tmp, out);
 
   console.log(`[fetch-data] ${repos.length} repos -> ${out}`, JSON.stringify(summary));
