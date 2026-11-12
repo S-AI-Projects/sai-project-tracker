@@ -19,7 +19,8 @@ type Issue = {
 }
 type Student = { id: string; name: string; batch: string; lab: string; repo: string; issues: Issue[] }
 type Day = { date: string; count: number }
-type Data = { org: string; syncedAt: string; commits?: Day[]; students: Student[] }
+type Commits = { days: string[]; total: number[]; repos: Record<string, number[]>; students: Record<string, number[]> }
+type Data = { org: string; syncedAt: string; commits?: Commits | null; students: Student[] }
 type Route = { tab: 'students' | 'repos' | 'activity'; repo: string }
 
 const STATUSES: Status[] = ['merged', 'open', 'none']
@@ -184,7 +185,7 @@ export default function App() {
           ) : route.tab === 'repos' ? (
             <Repos data={data} selected={route.repo} select={(r) => go('repos', r)} />
           ) : (
-            <Activity days={data.commits ?? []} />
+            <Activity data={data} />
           ))}
       </main>
     </div>
@@ -595,8 +596,42 @@ function Repos({ data, selected, select }: { data: Data; selected: string; selec
 const fmtDay = (date: string, opts: Intl.DateTimeFormatOptions) =>
   new Date(date + 'T00:00:00').toLocaleDateString(undefined, opts)
 
-function Activity({ days }: { days: Day[] }) {
+const sum = (xs: number[]) => xs.reduce((n, x) => n + x, 0)
+
+function Activity({ data }: { data: Data }) {
+  const commits = data.commits && !Array.isArray(data.commits) ? data.commits : null
+  const [repo, setRepo] = useState('')
+  const [student, setStudent] = useState('')
+  const [group, setGroup] = useState<'repos' | 'students'>('repos')
   const [hover, setHover] = useState<Day | null>(null)
+
+  const names = useMemo(() => new Map(data.students.map((s) => [s.id, s])), [data.students])
+  const repoNames = useMemo(() => uniq(data.students.map((s) => s.repo)), [data.students])
+  const studentOptions = data.students.filter((s) => !repo || s.repo === repo)
+  const pickRepo = (r: string) => {
+    setRepo(r)
+    if (r && names.get(student)?.repo !== r) setStudent('')
+  }
+
+  const counts = !commits ? [] : student ? commits.students[student] : repo ? commits.repos[repo] : commits.total
+  const days: Day[] = (commits?.days ?? []).map((date, i) => ({ date, count: counts?.[i] ?? 0 }))
+  const scope = student ? (names.get(student)?.name ?? '') : repo || 'All repositories'
+
+  const rows = useMemo(() => {
+    if (!commits) return []
+    const list =
+      group === 'repos'
+        ? repoNames.map((r) => ({ key: r, label: r, sub: '', counts: commits.repos[r] }))
+        : data.students
+            .filter((s) => !repo || s.repo === repo)
+            .map((s) => ({ key: s.id, label: s.name, sub: s.repo, counts: commits.students[s.id] }))
+    return list
+      .map((r) => ({ ...r, counts: r.counts ?? commits.days.map(() => 0) }))
+      .map((r) => ({ ...r, total: sum(r.counts) }))
+      .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label))
+  }, [commits, group, repo, repoNames, data.students])
+  const cellMax = Math.max(1, ...rows.flatMap((r) => r.counts))
+
   const total = days.reduce((n, d) => n + d.count, 0)
   // Round the axis top up to a "nice" number so the gridlines read cleanly.
   const peak = Math.max(1, ...days.map((d) => d.count))
@@ -606,13 +641,23 @@ function Activity({ days }: { days: Day[] }) {
   const labelEvery = Math.ceil(days.length / 10)
   const shown = hover ?? days[days.length - 1]
 
-  if (!days.length) return <p className="text-sm text-muted-foreground">No commit data yet. It appears after the next refresh.</p>
+  if (!commits) return <p className="text-sm text-muted-foreground">No commit data yet. It appears after the next refresh.</p>
 
   return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Filter label="Repository" value={repo} onChange={pickRepo} options={[{ value: '', label: 'All repositories' }, ...repoNames.map((r) => ({ value: r, label: r }))]} />
+        <Filter
+          label="Student"
+          value={student}
+          onChange={setStudent}
+          options={[{ value: '', label: 'All students' }, ...studentOptions.map((s) => ({ value: s.id, label: s.name }))]}
+        />
+      </div>
     <Card className="p-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">Commits per day</h2>
+          <h2 className="text-base font-semibold">Commits per day: {scope}</h2>
           <p className="text-[13px] text-muted-foreground">
             Commits in pull requests across all repositories, by author date (IST). Merge commits excluded.
           </p>
@@ -674,5 +719,64 @@ function Activity({ days }: { days: Day[] }) {
         </div>
       </div>
     </Card>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">Commits per day by {group === 'repos' ? 'repository' : 'student'}</h2>
+          <Tabs value={group} onValueChange={(g) => setGroup(g as typeof group)}>
+            <TabsList>
+              <TabsTrigger value="repos">By repository</TabsTrigger>
+              <TabsTrigger value="students">By student</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+          <Table className="text-[13px]">
+            <thead>
+              <TableRow>
+                <TableHead>{group === 'repos' ? 'Repository' : 'Student'}</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                {commits.days.map((d) => (
+                  <TableHead key={d} className="text-right whitespace-nowrap">
+                    {fmtDay(d, { day: 'numeric', month: 'short' })}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <TableRow key={r.key} className="first:border-t">
+                  <TableCell className="whitespace-nowrap">
+                    <Button
+                      variant="link"
+                      className="text-[13px]"
+                      onClick={() => {
+                        if (group === 'repos') pickRepo(r.key)
+                        else {
+                          setRepo(names.get(r.key)?.repo ?? '')
+                          setStudent(r.key)
+                        }
+                        scrollTo({ top: 0, behavior: 'smooth' })
+                      }}
+                    >
+                      {r.label}
+                    </Button>
+                    {r.sub && <div className="text-xs text-muted-foreground">{r.sub}</div>}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">{r.total}</TableCell>
+                  {r.counts.map((n, i) => (
+                    <TableCell
+                      key={i}
+                      className={cn('text-right tabular-nums', !n && 'text-muted-foreground')}
+                      style={n ? { backgroundColor: `rgb(37 99 235 / ${0.08 + 0.32 * (n / cellMax)})` } : undefined}
+                    >
+                      {n}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </tbody>
+          </Table>
+      </div>
+    </div>
   )
 }

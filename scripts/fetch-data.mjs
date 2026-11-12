@@ -117,7 +117,7 @@ const COMMITS_QUERY = `query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: 50, after: $cursor) {
       pageInfo { hasNextPage endCursor }
-      nodes { commits(first: 100) { nodes { commit { oid authoredDate parents { totalCount } } } } }
+      nodes { number author { login } commits(first: 100) { nodes { commit { oid authoredDate parents { totalCount } } } } }
     }
   }
 }`;
@@ -130,7 +130,8 @@ async function fetchPrCommits(repo) {
     const res = await gh('https://api.github.com/graphql', headers, { query: COMMITS_QUERY, variables: { owner: ORG, name: repo, cursor } });
     if (res.errors?.length) throw new Error(`GitHub GraphQL for ${repo}: ${res.errors[0].message}`);
     const prs = res.data.repository.pullRequests;
-    for (const pr of prs.nodes) for (const { commit } of pr.commits.nodes) if (commit.parents.totalCount < 2) all.push(commit);
+    for (const pr of prs.nodes) for (const { commit } of pr.commits.nodes)
+      if (commit.parents.totalCount < 2) all.push({ oid: commit.oid, authoredDate: commit.authoredDate, repo, pr: pr.number, login: pr.author?.login ?? '' });
     if (!prs.pageInfo.hasNextPage) return all;
     cursor = prs.pageInfo.endCursor;
   }
@@ -138,18 +139,28 @@ async function fetchPrCommits(repo) {
 
 const istDay = (t) => new Date(new Date(t).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
 
-/** [{date: 'YYYY-MM-DD', count}] for every IST day from COMMITS_SINCE to today, by author date, each commit counted once. */
-export function commitsPerDay(commits, now = Date.now()) {
-  const days = new Map();
-  for (let d = COMMITS_SINCE, end = istDay(now); d <= end; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) days.set(d, 0);
+/**
+ * Commits per IST day from COMMITS_SINCE to today, by author date, each commit counted once.
+ * Returns { days: [dates], total: [counts], repos: {repo: [counts]}, students: {id: [counts]} }; rows that are all zero are left out.
+ * studentOf(commit) returns the student id the commit belongs to, or undefined.
+ */
+export function commitsPerDay(commits, studentOf = () => undefined, now = Date.now()) {
+  const days = [];
+  for (let d = COMMITS_SINCE, end = istDay(now); d <= end; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) days.push(d);
+  const index = new Map(days.map((d, i) => [d, i]));
+  const out = { days, total: days.map(() => 0), repos: {}, students: {} };
+  const bump = (group, key, i) => { (group[key] ??= days.map(() => 0))[i]++; };
   const seen = new Set();
   for (const c of commits) {
-    const d = istDay(c.authoredDate);
-    if (seen.has(c.oid) || !days.has(d)) continue;
+    const i = index.get(istDay(c.authoredDate));
+    if (seen.has(c.oid) || i == null) continue;
     seen.add(c.oid);
-    days.set(d, days.get(d) + 1);
+    out.total[i]++;
+    bump(out.repos, c.repo, i);
+    const id = studentOf(c);
+    if (id) bump(out.students, id, i);
   }
-  return [...days].map(([date, count]) => ({ date, count }));
+  return out;
 }
 
 /** Repos go out in small batches with a pause between them, to stay under GitHub's secondary limits. */
@@ -172,8 +183,22 @@ export async function fetchData() {
   for (const r of rows) if (r.taskId) taskMaps.get(r.repo).set(String(r.taskId).toUpperCase(), r.number);
 
   const prLists = await inBatches(repos, BATCH, BATCH_PAUSE_MS, fetchPrs); // throws on any failure
-  let commits = [];
-  if (process.env.GITHUB_TOKEN) commits = commitsPerDay((await inBatches(repos, BATCH, BATCH_PAUSE_MS, fetchPrCommits)).flat());
+  // A commit belongs to the student whose issue its PR is linked to, else to the student that PR author's other PRs are linked to.
+  const issueStudent = new Map(rows.map((r) => [`${r.repo}#${r.number}`, r.id]));
+  const prStudent = new Map();
+  const loginStudent = new Map();
+  repos.forEach((repo, i) => {
+    for (const pr of prLists[i]) {
+      const id = issuesForPr(pr, repo, taskMaps.get(repo)).map((n) => issueStudent.get(`${repo}#${n}`)).find(Boolean);
+      if (!id) continue;
+      prStudent.set(`${repo}#${pr.number}`, id);
+      if (pr.user?.login) loginStudent.set(pr.user.login.toLowerCase(), id);
+    }
+  });
+  const studentOf = (c) => prStudent.get(`${c.repo}#${c.pr}`) ?? loginStudent.get(c.login.toLowerCase());
+
+  let commits = null;
+  if (process.env.GITHUB_TOKEN) commits = commitsPerDay((await inBatches(repos, BATCH, BATCH_PAUSE_MS, fetchPrCommits)).flat(), studentOf);
   else console.warn('[fetch-data] no GITHUB_TOKEN, skipping commits per day (GraphQL needs a token)');
 
   const best = new Map(repos.map((repo, i) => [repo, bestPrs(prLists[i], repo, taskMaps.get(repo))]));
